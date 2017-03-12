@@ -1,0 +1,496 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <memory.h>
+#include <X11/Xutil.h>
+#include <X11/Xlib.h>
+
+#include "struct.h"
+
+#define max(a, b) \
+    ({ __typeof__ (a) _a = (a); \
+       __typeof__ (b) _b = (b); \
+     _a > _b ? _a : _b; })
+
+#define min(a, b) \
+    ({ __typeof__ (a) _a = (a); \
+       __typeof__ (b) _b = (b); \
+     _a > _b ? _b : _a; })
+
+char WINDOW_NAME[] = "Graphics Window";
+char ICON_NAME[] = "Icon";
+
+Display *display;
+int screen;
+Window main_window;
+GC gc;
+unsigned long foreground, background;
+
+Bool loop;
+
+int windowHeight = 400;
+int windowWidth = 500;
+
+int Xs[1000];
+int Ys[1000];
+int currentIndex;
+
+XColor red, black;
+XImage *image;
+
+edge *ET[1000];
+edge *AET = NULL;
+
+int xind = -1;
+int xx[1000];
+
+void connectX()
+{
+	display = XOpenDisplay(NULL);
+	if (display == NULL)
+	{
+		fprintf(stderr, "Cannot connect to X\n");
+		exit(1);
+	}
+	screen = DefaultScreen(display);
+	foreground = BlackPixel(display, screen);
+	background = WhitePixel(display, screen);
+}
+
+Window openWindow(int x, int y, int width, int height,
+				  int border_width, int argc, char **argv)
+{
+	Window new_window;
+	XSizeHints size_hints;
+	new_window = XCreateSimpleWindow(display, DefaultRootWindow(display),
+									 x, y, width, height, border_width, foreground,
+									 background);
+	size_hints.x = x;
+	size_hints.y = y;
+	size_hints.width = width;
+	size_hints.height = height;
+	size_hints.flags = PPosition | PSize;
+	XSetStandardProperties(display, new_window, WINDOW_NAME, ICON_NAME,
+						   None, argv, argc, &size_hints);
+	XSelectInput(display, new_window, (ButtonPressMask | KeyPressMask |
+									   ExposureMask | PointerMotionMask));
+	return (new_window);
+}
+
+GC getGC()
+{
+	GC gc;
+	XGCValues gcValues;
+	gc = XCreateGC(display, main_window, (unsigned long)0, &gcValues);
+	XSetBackground(display, gc, background);
+	XSetForeground(display, gc, foreground);
+	return (gc);
+}
+
+void disconnectX()
+{
+	XCloseDisplay(display);
+	exit(0);
+}
+
+void doButtonPressEvent(XButtonEvent *pEvent)
+{
+	++currentIndex;
+	Xs[currentIndex] = pEvent->x;
+	Ys[currentIndex] = pEvent->y;
+	
+	connectPoints(currentIndex);
+	
+	// why without this it does not recognize key press?
+	XFlush(display);
+	
+	return;
+}
+
+void doExposeEvent(XExposeEvent *pEvent)
+{
+}
+
+void doMotionNotifyEvent(XMotionEvent *pEvent)
+{
+	int x, y;
+	char hitLoc[20];
+	x = pEvent->x;
+	y = pEvent->y;
+	sprintf(hitLoc, "Pixel: %d, %d", x, y);
+	
+	XDrawImageString(display, main_window, gc, 1, windowHeight, hitLoc, strlen(hitLoc));
+}
+
+void reset_screen()
+{
+	XClearWindow(display, main_window);
+	XFlush(display);
+}
+
+void doKeyPressEvent(XKeyEvent *pEvent)
+{
+	int key_buffer_size = 10;
+	char key_buffer[9];
+	XComposeStatus compose_status;
+	KeySym key_sym;
+	XLookupString(pEvent, key_buffer, key_buffer_size, &key_sym, &compose_status);
+	if (key_buffer[0] == 'd')
+	{
+		loop = False;
+	}
+	else if (key_buffer[0] == 'q')
+	{
+		disconnectX();
+	}
+	else if (key_buffer[0] == 'c')
+	{
+		reset_screen();
+	}
+	
+	else
+		printf("You pressed %c\n", key_buffer[0]);
+}
+
+void connectPoints(int index)
+{
+	int i = index;
+	int j = max(0, index - 1);
+	
+	XDrawLine(display, main_window, gc, Xs[j], Ys[j], Xs[i], Ys[i]);
+	
+	XFlush(display);
+}
+
+void clean()
+{
+	printf("clean\n");
+	for (int i = 0; i <= currentIndex; ++i)
+		Xs[i] = Ys[i] = 0;
+	currentIndex = -1;
+	AET = NULL;
+	for (int i = 0; i < windowHeight; ++i)
+		ET[i] = NULL;
+	
+	XSetForeground(display, gc, black.pixel);
+}
+
+void add_edge_to_ET(int ymin, int ymax, int xmin, int dx, int dy)
+{
+	printf("add_edge_et\n");
+	edge *newEdge = (edge *)malloc(sizeof(edge));
+	newEdge->ymax = ymax;
+	newEdge->x = xmin;
+	newEdge->dx = dx;
+	newEdge->dy = dy;
+	newEdge->next = NULL;
+	
+	newEdge->sum = 0;
+	newEdge->sign = 1;
+	if(dx<0) newEdge->sign *= -1;
+	if(dy<0) newEdge->sign *= -1;
+	
+	// If no edges added at specified index
+	if (ET[ymin] == NULL) {
+		ET[ymin] = newEdge;
+	}
+	else
+	{
+		//Add to Beginning of List
+		if (xmin < ET[ymin]->x)
+		{
+			edge *nextEdge = ET[ymin];
+			newEdge->next = nextEdge;
+			ET[ymin] = newEdge;
+		}
+		else
+		{
+			// traverse list of edges until proper spot is found
+			edge *currEdge = ET[ymin];
+			int mCondition = 0;
+			while ((currEdge->next != NULL) && (currEdge->next->x <= xmin) && (mCondition == 0))
+			{
+				if (currEdge->next->x == xmin)
+				{
+					double m = dx / dy;
+					double nextM = currEdge->next->dx / currEdge->next->dy;
+					if (nextM <= m)
+						currEdge = currEdge->next;
+					else
+						mCondition = 1;
+				}
+				else
+				{
+					currEdge = currEdge->next;
+				}
+			}
+			
+			//Add to End of List
+			if (currEdge->next == NULL)
+			{
+				currEdge->next = newEdge;
+				//Add to Middle of List
+			}
+			else
+			{
+				edge *nextEdge = currEdge->next;
+				newEdge->next = nextEdge;
+				currEdge->next = newEdge;
+			}
+		}
+	}
+}
+
+void build_ET(int n)
+{
+	printf("build_et\n");
+	for (int i = 0; i < n; ++i)
+	{
+		int xmin;
+		
+		if (Ys[i + 1] > Ys[i])
+			xmin = Xs[i];
+		else
+			xmin = Xs[i + 1];
+		
+		add_edge_to_ET(min(Ys[i], Ys[i + 1]), max(Ys[i], Ys[i + 1]), xmin, Xs[i + 1] - Xs[i],
+					   Ys[i + 1] - Ys[i]);
+	}
+}
+
+// return index of the first non-empty Edge Table index
+int get_minY()
+{
+	printf("get_min\n");
+	for (int i = 0; i < windowHeight; ++i)
+		if (ET[i] != NULL)
+			return i;
+}
+
+// search ET and AET for any remaining edges, return 1 if at least one is found
+Bool edges_to_process()
+{
+	printf("edges_to_process\n");
+	for (int i = 0; i < windowHeight; ++i)
+		if (ET[i] != NULL)
+			return 1;
+	
+	if (AET != NULL)
+		return 1;
+	
+	return 0;
+}
+
+// Discard Active Edge List entries where y = ymax
+void remove_from_AET(int y)
+{
+	printf("remove_from_aet\n");
+	edge *currEdge = AET;
+	edge *prevEdge = NULL;
+	while (currEdge != NULL)
+	{
+		if (currEdge->ymax == y)
+		{
+			if (prevEdge == NULL)
+			{
+				//beginning of list, simply remove first element
+				currEdge = AET->next;
+				AET = currEdge;
+			}
+			else
+			{
+				prevEdge->next = currEdge->next;
+				currEdge = prevEdge->next;
+			}
+		}
+		else
+		{
+			// ymax != y, continue down list
+			prevEdge = currEdge;
+			currEdge = currEdge->next;
+		}
+	}
+}
+
+// Move from ET[y] to AET when ymin = y
+void add_to_AET(int y)
+{
+	printf("add_to_aet\n");
+	if (ET[y] != NULL)
+	{
+		if (AET == NULL)
+		{
+			AET = ET[y]; // AET empty
+		}
+		else
+		{
+			edge *currEdge = AET;
+			//get end of list
+			while (currEdge->next != NULL)
+			{
+				currEdge = currEdge->next;
+			}
+			//attach edges in ET to end of AET
+			currEdge->next = ET[y];
+		}
+		//remove from ET
+		ET[y] = NULL;
+	}
+}
+
+// Fill pixels on scan line y using pairs of x coordinates from AET
+void process_AET(int y)
+{
+	printf("process_aet\n");
+	if (AET == NULL || AET->next == NULL)
+		return;
+	
+	xind = -1;
+	
+	edge *edge1 = AET;
+	
+	while (edge1 != NULL)
+	{
+		int x1 = edge1->x;
+		
+		xind++;
+		xx[xind] = x1;
+		
+		edge1 = edge1->next;
+	}
+	
+	for (int i = 0; i <= xind; i++)
+	{
+		for (int j = i + 1; j <= xind; j++)
+		{
+			if (xx[i] > xx[j])
+			{
+				int tmp = xx[i];
+				xx[i] = xx[j];
+				xx[j] = tmp;
+			}
+		}
+	}
+	
+	for (int i = 1; i <= xind; i += 2)
+	{
+		XDrawLine(display, main_window, gc, xx[i - 1], y, xx[i], y);
+		XFlush(display);
+	}
+	
+	//XDrawLine(display, main_window, gc, min(x1, x2), y, max(x1, x2), y);
+	//XFlush(display);
+}
+
+// Update all edges in the AET
+void updateAET()
+{
+	printf("update_aet\n");
+	edge *currEdge = AET;
+	while (currEdge != NULL)
+	{
+		if (currEdge->dy != 0)
+		{
+			currEdge->sum+=abs(currEdge->dx);
+			while(currEdge->sum>abs(currEdge->dy)){
+				currEdge->sum-=abs(currEdge->dy);
+				currEdge->x+=currEdge->sign;
+			}
+			//currEdge->x += (float) currEdge->dx / (float) currEdge->dy;
+		}
+		currEdge = currEdge->next;
+	}
+}
+
+void color(int n)
+{
+	XSetForeground(display, gc, red.pixel);
+	
+	build_ET(currentIndex);
+	
+	int y = get_minY();
+	
+	while (edges_to_process())
+	{
+		// Discard Active Edge List entries where y = ymax
+		remove_from_AET(y);
+		
+		// Move from Edge Table[y] to Active Edge List when ymin = y
+		add_to_AET(y);
+		
+		// Fill pixels on scan line y using pairs of x coordinates from AET
+		process_AET(y);
+		
+		// Update all edges in the AET
+		updateAET();
+		
+		y++;
+	}
+	
+	return;
+}
+
+int main(int argc, char **argv)
+{
+	connectX();
+	
+	main_window = openWindow(10, 20, windowWidth, windowHeight, 5, argc, argv);
+	
+	gc = getGC();
+	
+	XMapWindow(display, main_window);
+	
+	XFlush(display);
+	
+	XEvent event;
+	
+	/* get colors */
+	Colormap screen_colormap = DefaultColormap(display, DefaultScreen(display));
+	Status st = XAllocNamedColor(display, screen_colormap, "black", &black, &black);
+	st = XAllocNamedColor(display, screen_colormap, "red", &red, &red);
+
+cycle:
+	
+	clean();
+	
+	loop = True;
+	while (loop)
+	{
+		XNextEvent(display, &event);
+		switch (event.type)
+		{
+			case ButtonPress:
+				printf("Button Pressed\n");
+				doButtonPressEvent(&event);
+				break;
+			
+			case KeyPress:
+				printf("Key pressed\n");
+				doKeyPressEvent(&event);
+				break;
+			
+			case Expose:
+				printf("Expose event\n");
+				doExposeEvent(&event);
+				break;
+			
+			case MotionNotify:
+				doMotionNotifyEvent(&event);
+				break;
+		}
+	}
+	
+	printf("Total %d entered points\n", currentIndex + 1);
+	/*printf("intput points\n");
+	for(int i=0;i<currentIndex;i++)
+		printf("%d  %d\n", Ys[i], Xs[i]);*/
+	
+	// add first point at the end so we have first-last connection
+	++currentIndex;
+	Xs[currentIndex] = Xs[0];
+	Ys[currentIndex] = Ys[0];
+	connectPoints(currentIndex);
+	
+	color(currentIndex);
+	
+	goto cycle;
+}
