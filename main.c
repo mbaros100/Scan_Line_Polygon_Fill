@@ -26,6 +26,7 @@ GC gc;
 unsigned long foreground, background;
 
 Bool loop;
+Bool triangleInterpolation;
 
 int windowHeight = 400;
 int windowWidth = 500;
@@ -34,7 +35,7 @@ int Xs[1000];
 int Ys[1000];
 int currentIndex;
 
-XColor red, black;
+XColor red, black, curColor;
 XImage *image;
 
 edge *ET[1000];
@@ -42,6 +43,8 @@ edge *AET = NULL;
 
 int xind = -1;
 int xx[1000];
+
+int curPixelColor[3];
 
 void connectX()
 {
@@ -57,22 +60,22 @@ void connectX()
 }
 
 Window openWindow(int x, int y, int width, int height,
-				  int border_width, int argc, char **argv)
+	int border_width, int argc, char **argv)
 {
 	Window new_window;
 	XSizeHints size_hints;
 	new_window = XCreateSimpleWindow(display, DefaultRootWindow(display),
-									 x, y, width, height, border_width, foreground,
-									 background);
+		x, y, width, height, border_width, foreground,
+		background);
 	size_hints.x = x;
 	size_hints.y = y;
 	size_hints.width = width;
 	size_hints.height = height;
 	size_hints.flags = PPosition | PSize;
 	XSetStandardProperties(display, new_window, WINDOW_NAME, ICON_NAME,
-						   None, argv, argc, &size_hints);
+		None, argv, argc, &size_hints);
 	XSelectInput(display, new_window, (ButtonPressMask | KeyPressMask |
-									   ExposureMask | PointerMotionMask));
+		ExposureMask | PointerMotionMask));
 	return (new_window);
 }
 
@@ -97,12 +100,11 @@ void doButtonPressEvent(XButtonEvent *pEvent)
 	++currentIndex;
 	Xs[currentIndex] = pEvent->x;
 	Ys[currentIndex] = pEvent->y;
-	
+
 	connectPoints(currentIndex);
-	
-	// why without this it does not recognize key press?
+
 	XFlush(display);
-	
+
 	return;
 }
 
@@ -117,7 +119,7 @@ void doMotionNotifyEvent(XMotionEvent *pEvent)
 	x = pEvent->x;
 	y = pEvent->y;
 	sprintf(hitLoc, "Pixel: %d, %d", x, y);
-	
+
 	XDrawImageString(display, main_window, gc, 1, windowHeight, hitLoc, strlen(hitLoc));
 }
 
@@ -142,11 +144,17 @@ void doKeyPressEvent(XKeyEvent *pEvent)
 	{
 		disconnectX();
 	}
+	else if (key_buffer[0] == 't')
+	{
+		triangleInterpolation = True;
+		loop = False;
+	}
+
 	else if (key_buffer[0] == 'c')
 	{
 		reset_screen();
 	}
-	
+
 	else
 		printf("You pressed %c\n", key_buffer[0]);
 }
@@ -155,42 +163,43 @@ void connectPoints(int index)
 {
 	int i = index;
 	int j = max(0, index - 1);
-	
+
 	XDrawLine(display, main_window, gc, Xs[j], Ys[j], Xs[i], Ys[i]);
-	
+
 	XFlush(display);
 }
 
 void clean()
 {
-	printf("clean\n");
 	for (int i = 0; i <= currentIndex; ++i)
 		Xs[i] = Ys[i] = 0;
 	currentIndex = -1;
 	AET = NULL;
 	for (int i = 0; i < windowHeight; ++i)
 		ET[i] = NULL;
-	
+
 	XSetForeground(display, gc, black.pixel);
 }
 
 void add_edge_to_ET(int ymin, int ymax, int xmin, int dx, int dy)
 {
-	printf("add_edge_et\n");
 	edge *newEdge = (edge *)malloc(sizeof(edge));
 	newEdge->ymax = ymax;
 	newEdge->x = xmin;
 	newEdge->dx = dx;
 	newEdge->dy = dy;
 	newEdge->next = NULL;
-	
+
 	newEdge->sum = 0;
 	newEdge->sign = 1;
-	if(dx<0) newEdge->sign *= -1;
-	if(dy<0) newEdge->sign *= -1;
-	
+	if (dx < 0)
+		newEdge->sign *= -1;
+	if (dy < 0)
+		newEdge->sign *= -1;
+
 	// If no edges added at specified index
-	if (ET[ymin] == NULL) {
+	if (ET[ymin] == NULL)
+	{
 		ET[ymin] = newEdge;
 	}
 	else
@@ -223,7 +232,7 @@ void add_edge_to_ET(int ymin, int ymax, int xmin, int dx, int dy)
 					currEdge = currEdge->next;
 				}
 			}
-			
+
 			//Add to End of List
 			if (currEdge->next == NULL)
 			{
@@ -242,25 +251,22 @@ void add_edge_to_ET(int ymin, int ymax, int xmin, int dx, int dy)
 
 void build_ET(int n)
 {
-	printf("build_et\n");
+	int xmin;
 	for (int i = 0; i < n; ++i)
 	{
-		int xmin;
-		
 		if (Ys[i + 1] > Ys[i])
 			xmin = Xs[i];
 		else
 			xmin = Xs[i + 1];
-		
+
 		add_edge_to_ET(min(Ys[i], Ys[i + 1]), max(Ys[i], Ys[i + 1]), xmin, Xs[i + 1] - Xs[i],
-					   Ys[i + 1] - Ys[i]);
+			Ys[i + 1] - Ys[i]);
 	}
 }
 
 // return index of the first non-empty Edge Table index
 int get_minY()
 {
-	printf("get_min\n");
 	for (int i = 0; i < windowHeight; ++i)
 		if (ET[i] != NULL)
 			return i;
@@ -269,21 +275,19 @@ int get_minY()
 // search ET and AET for any remaining edges, return 1 if at least one is found
 Bool edges_to_process()
 {
-	printf("edges_to_process\n");
 	for (int i = 0; i < windowHeight; ++i)
 		if (ET[i] != NULL)
 			return 1;
-	
+
 	if (AET != NULL)
 		return 1;
-	
+
 	return 0;
 }
 
 // Discard Active Edge List entries where y = ymax
 void remove_from_AET(int y)
 {
-	printf("remove_from_aet\n");
 	edge *currEdge = AET;
 	edge *prevEdge = NULL;
 	while (currEdge != NULL)
@@ -314,7 +318,7 @@ void remove_from_AET(int y)
 // Move from ET[y] to AET when ymin = y
 void add_to_AET(int y)
 {
-	printf("add_to_aet\n");
+	// printf("add_to_aet\n");
 	if (ET[y] != NULL)
 	{
 		if (AET == NULL)
@@ -340,24 +344,23 @@ void add_to_AET(int y)
 // Fill pixels on scan line y using pairs of x coordinates from AET
 void process_AET(int y)
 {
-	printf("process_aet\n");
 	if (AET == NULL || AET->next == NULL)
 		return;
-	
+
 	xind = -1;
-	
+
 	edge *edge1 = AET;
-	
+
 	while (edge1 != NULL)
 	{
 		int x1 = edge1->x;
-		
+
 		xind++;
 		xx[xind] = x1;
-		
+
 		edge1 = edge1->next;
 	}
-	
+
 	for (int i = 0; i <= xind; i++)
 	{
 		for (int j = i + 1; j <= xind; j++)
@@ -370,30 +373,51 @@ void process_AET(int y)
 			}
 		}
 	}
-	
+
+	if (!triangleInterpolation) {
+		curPixelColor[0] = 65535;
+		curPixelColor[1] = 0;
+		curPixelColor[2] = 0;
+	}
+
 	for (int i = 1; i <= xind; i += 2)
 	{
-		XDrawLine(display, main_window, gc, xx[i - 1], y, xx[i], y);
-		XFlush(display);
+		if (triangleInterpolation)
+		{
+			XImage* image = XGetImage(display, main_window, 0, 0, windowWidth, windowHeight, AllPlanes, XYPixmap);
+
+			if (image == NULL) {
+				printf("image is null\n");
+				disconnectX();
+			}
+
+			for (int j = xx[i - 1]; j <= xx[i]; ++j)
+			{
+				choosecolor(j, y);
+				setColor();
+				XDrawPoint(display, main_window, gc, j, y);
+			}
+		}
+		else {
+			XDrawLine(display, main_window, gc, xx[i - 1], y, xx[i], y);
+			XFlush(display);
+		}
 	}
-	
-	//XDrawLine(display, main_window, gc, min(x1, x2), y, max(x1, x2), y);
-	//XFlush(display);
 }
 
 // Update all edges in the AET
 void updateAET()
 {
-	printf("update_aet\n");
 	edge *currEdge = AET;
 	while (currEdge != NULL)
 	{
 		if (currEdge->dy != 0)
 		{
-			currEdge->sum+=abs(currEdge->dx);
-			while(currEdge->sum>abs(currEdge->dy)){
-				currEdge->sum-=abs(currEdge->dy);
-				currEdge->x+=currEdge->sign;
+			currEdge->sum += abs(currEdge->dx);
+			while (currEdge->sum > abs(currEdge->dy))
+			{
+				currEdge->sum -= abs(currEdge->dy);
+				currEdge->x += currEdge->sign;
 			}
 			//currEdge->x += (float) currEdge->dx / (float) currEdge->dy;
 		}
@@ -404,93 +428,119 @@ void updateAET()
 void color(int n)
 {
 	XSetForeground(display, gc, red.pixel);
-	
+
 	build_ET(currentIndex);
-	
+
 	int y = get_minY();
-	
+
 	while (edges_to_process())
 	{
 		// Discard Active Edge List entries where y = ymax
 		remove_from_AET(y);
-		
+
 		// Move from Edge Table[y] to Active Edge List when ymin = y
 		add_to_AET(y);
-		
+
 		// Fill pixels on scan line y using pairs of x coordinates from AET
 		process_AET(y);
-		
+
 		// Update all edges in the AET
 		updateAET();
-		
+
 		y++;
 	}
-	
+
 	return;
 }
+
+void setColor()
+{
+	curColor.pixel = ((curPixelColor[2] & 0xff) | ((curPixelColor[1] & 0xff) << 8) | ((curPixelColor[0] & 0xff) << 16));
+	XSetForeground(display, gc, curColor.pixel);
+}
+
+double triarea(double dX0, double dY0, double dX1, double dY1, double dX2, double dY2)
+{
+	double dArea = ((dX1 - dX0)*(dY2 - dY0) - (dX2 - dX0)*(dY1 - dY0)) / 2.0;
+	return (dArea > 0.0) ? dArea : -dArea;
+}
+
+
+void choosecolor(int x, int y)
+{
+	curPixelColor[0] = (int)(255.0 * (triarea(x, y, Xs[1], Ys[1], Xs[2], Ys[2]) / (triarea(Xs[0], Ys[0], Xs[1], Ys[1], Xs[2], Ys[2]))));
+	curPixelColor[1] = (int)(255.0 * (triarea(x, y, Xs[0], Ys[0], Xs[2], Ys[2]) / (triarea(Xs[0], Ys[0], Xs[1], Ys[1], Xs[2], Ys[2]))));
+	curPixelColor[2] = (int)(255.0 * (triarea(x, y, Xs[0], Ys[0], Xs[1], Ys[1]) / (triarea(Xs[0], Ys[0], Xs[1], Ys[1], Xs[2], Ys[2]))));
+}
+
 
 int main(int argc, char **argv)
 {
 	connectX();
-	
+
 	main_window = openWindow(10, 20, windowWidth, windowHeight, 5, argc, argv);
-	
+
 	gc = getGC();
-	
+
 	XMapWindow(display, main_window);
-	
+
 	XFlush(display);
-	
+
 	XEvent event;
-	
+
 	/* get colors */
 	Colormap screen_colormap = DefaultColormap(display, DefaultScreen(display));
 	Status st = XAllocNamedColor(display, screen_colormap, "black", &black, &black);
 	st = XAllocNamedColor(display, screen_colormap, "red", &red, &red);
 
 cycle:
-	
+
 	clean();
-	
+
 	loop = True;
+	triangleInterpolation = False;
+
 	while (loop)
 	{
 		XNextEvent(display, &event);
 		switch (event.type)
 		{
-			case ButtonPress:
-				printf("Button Pressed\n");
-				doButtonPressEvent(&event);
-				break;
-			
-			case KeyPress:
-				printf("Key pressed\n");
-				doKeyPressEvent(&event);
-				break;
-			
-			case Expose:
-				printf("Expose event\n");
-				doExposeEvent(&event);
-				break;
-			
-			case MotionNotify:
-				doMotionNotifyEvent(&event);
-				break;
+		case ButtonPress:
+			printf("Button Pressed\n");
+			doButtonPressEvent(&event);
+			break;
+
+		case KeyPress:
+			printf("Key pressed\n");
+			doKeyPressEvent(&event);
+			break;
+
+		case Expose:
+			printf("Expose event\n");
+			doExposeEvent(&event);
+			break;
+
+		case MotionNotify:
+			doMotionNotifyEvent(&event);
+			break;
 		}
 	}
-	
+
 	printf("Total %d entered points\n", currentIndex + 1);
 	/*printf("intput points\n");
 	for(int i=0;i<currentIndex;i++)
-		printf("%d  %d\n", Ys[i], Xs[i]);*/
-	
+	printf("%d  %d\n", Ys[i], Xs[i]);*/
+
 	// add first point at the end so we have first-last connection
 	++currentIndex;
 	Xs[currentIndex] = Xs[0];
 	Ys[currentIndex] = Ys[0];
 	connectPoints(currentIndex);
-	
+
+	if (triangleInterpolation && currentIndex != 3)
+		goto cycle;
+
 	color(currentIndex);
-	
+
 	goto cycle;
 }
