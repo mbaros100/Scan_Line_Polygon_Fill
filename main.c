@@ -384,13 +384,6 @@ void process_AET(int y)
 	{
 		if (triangleInterpolation)
 		{
-			XImage* image = XGetImage(display, main_window, 0, 0, windowWidth, windowHeight, AllPlanes, XYPixmap);
-
-			if (image == NULL) {
-				printf("image is null\n");
-				disconnectX();
-			}
-
 			for (int j = xx[i - 1]; j <= xx[i]; ++j)
 			{
 				choosecolor(j, y);
