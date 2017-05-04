@@ -1,0 +1,3 @@
+/home/vahagng/Documents/ClionProjects/ScanLine_Debug/cmake-build-debug/CMakeFiles/rebuild_cache.dir
+/home/vahagng/Documents/ClionProjects/ScanLine_Debug/cmake-build-debug/CMakeFiles/edit_cache.dir
+/home/vahagng/Documents/ClionProjects/ScanLine_Debug/cmake-build-debug/CMakeFiles/ScanLine_Debug.dir

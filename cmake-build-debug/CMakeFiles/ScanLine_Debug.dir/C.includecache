@@ -1,0 +1,24 @@
+#IncludeRegexLine: ^[ 	]*#[ 	]*(include|import)[ 	]*[<"]([^">]+)([">])
+
+#IncludeRegexScan: ^.*$
+
+#IncludeRegexComplain: ^$
+
+#IncludeRegexTransform: 
+
+/home/vahagng/Documents/ClionProjects/ScanLine_Debug/main.c
+stdio.h
+-
+stdlib.h
+-
+memory.h
+-
+X11/Xutil.h
+-
+X11/Xlib.h
+-
+struct.h
+/home/vahagng/Documents/ClionProjects/ScanLine_Debug/struct.h
+
+/home/vahagng/Documents/ClionProjects/ScanLine_Debug/struct.h
+
