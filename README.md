@@ -9,3 +9,5 @@ When running the program:
   Pressing 'q' will exit the program.
 
   Pressing 'c' will clean the window.
+  
+  Pressing 't' will do a triangle interpolation with R, G, B colors at the corners
